@@ -154,6 +154,7 @@ public class DepictController {
     RATIO("ratio", 1.1),
     ROTATE("r", 0),
     FLIP("f", false),
+    PANEL("panel", ""),
     WIDTH("w", -1),
     HEIGHT("h", -1),
     SVGUNITS("svgunits", "mm");
@@ -489,7 +490,12 @@ public class DepictController {
     final String fmtlc = fmt.toLowerCase(Locale.ROOT);
 
     // pre-render the depiction
-    final Depiction depiction = isRxn ? myGenerator.depict(rxns) : myGenerator.depict(mol);
+    final Depiction depiction;
+    if (isRxn && !getString(Param.PANEL, extra).isEmpty()) {
+      depiction = myGenerator.depict(getReactionPanel(rxns, getString(Param.PANEL, extra)));
+    } else {
+      depiction = isRxn ? myGenerator.depict(rxns) : myGenerator.depict(mol);
+    }
 
     switch (fmtlc) {
       case Depiction.SVG_FMT:
@@ -506,6 +512,33 @@ public class DepictController {
     }
 
     throw new IllegalArgumentException("Unsupported format.");
+  }
+
+  private List<IAtomContainer> getReactionPanel(IReactionSet rxns, String panel) {
+    String normalized = panel.toLowerCase(Locale.ROOT);
+    List<IAtomContainer> components = new ArrayList<>();
+    for (IReaction rxn : rxns.reactions()) {
+      switch (normalized) {
+        case "reactant":
+        case "reactants":
+        case "substrate":
+        case "substrates":
+        case "left":
+          rxn.getReactants().atomContainers().forEach(components::add);
+          break;
+        case "product":
+        case "products":
+        case "target":
+        case "right":
+          rxn.getProducts().atomContainers().forEach(components::add);
+          break;
+        default:
+          throw new IllegalArgumentException("Unsupported reaction panel: " + panel);
+      }
+    }
+    if (components.isEmpty())
+      throw new IllegalArgumentException("No molecules found for reaction panel: " + panel);
+    return components;
   }
 
   private MolOp.DativeBond parseDativeParam(String s) {
