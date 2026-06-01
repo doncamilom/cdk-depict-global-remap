@@ -84,6 +84,8 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Chemical structure depiction controller.
@@ -155,6 +157,7 @@ public class DepictController {
     ROTATE("r", 0),
     FLIP("f", false),
     PANEL("panel", ""),
+    STRIPRXN("striprxn", ""),
     WIDTH("w", -1),
     HEIGHT("h", -1),
     SVGUNITS("svgunits", "mm");
@@ -499,8 +502,10 @@ public class DepictController {
 
     switch (fmtlc) {
       case Depiction.SVG_FMT:
-        return makeResponse(depiction.toSvgStr(getString(Param.SVGUNITS, extra))
-                                     .getBytes(), "image/svg+xml");
+        String svg = depiction.toSvgStr(getString(Param.SVGUNITS, extra));
+        if (isRxn)
+          svg = stripReactionSvg(svg, getString(Param.STRIPRXN, extra));
+        return makeResponse(svg.getBytes(), "image/svg+xml");
       case Depiction.PDF_FMT:
         return makeResponse(depiction.toPdfStr().getBytes(), "application/pdf");
       case Depiction.PNG_FMT:
@@ -512,6 +517,74 @@ public class DepictController {
     }
 
     throw new IllegalArgumentException("Unsupported format.");
+  }
+
+  private static final Pattern REACTION_ARROW_PATTERN =
+          Pattern.compile("\\n\\s*<line\\s+(?![^>]*(?:id|class)=)([^>]*)/>\\s*\\n\\s*<path\\s+(?![^>]*(?:id|class)=)([^>]*)/>",
+                          Pattern.DOTALL);
+  private static final Pattern ATTR_X1_PATTERN =
+          Pattern.compile("\\bx1='([^']+)'");
+  private static final Pattern VIEW_BOX_PATTERN =
+          Pattern.compile("viewBox='0 0 ([0-9.]+) ([0-9.]+)'");
+  private static final Pattern WIDTH_PATTERN =
+          Pattern.compile("width='([0-9.]+)([^']*)'");
+
+  static String stripReactionSvg(String svg, String stripMode) {
+    if (stripMode == null || stripMode.isEmpty())
+      return svg;
+
+    String normalized = stripMode.toLowerCase(Locale.ROOT);
+    if (!normalized.equals("product") &&
+        !normalized.equals("products") &&
+        !normalized.equals("right") &&
+        !normalized.equals("target"))
+      return svg;
+
+    Matcher arrow = REACTION_ARROW_PATTERN.matcher(svg);
+    if (!arrow.find())
+      return svg;
+
+    int outerClose = svg.lastIndexOf("\n  </g>\n</svg>");
+    if (outerClose < 0)
+      outerClose = svg.lastIndexOf("</g>\n</svg>");
+    if (outerClose <= arrow.start())
+      return svg;
+
+    String stripped = svg.substring(0, arrow.start()) + svg.substring(outerClose);
+
+    Matcher x1 = ATTR_X1_PATTERN.matcher(arrow.group(1));
+    if (!x1.find())
+      return stripped;
+
+    double width;
+    try {
+      width = Double.parseDouble(x1.group(1));
+    } catch (NumberFormatException e) {
+      return stripped;
+    }
+    if (width <= 0)
+      return stripped;
+
+    return withSvgWidth(stripped, width);
+  }
+
+  private static String withSvgWidth(String svg, double width) {
+    Matcher viewBox = VIEW_BOX_PATTERN.matcher(svg);
+    if (viewBox.find()) {
+      String replacement = String.format(Locale.ROOT, "viewBox='0 0 %.3f %s'",
+                                         width,
+                                         viewBox.group(2));
+      svg = viewBox.replaceFirst(replacement);
+    }
+
+    Matcher widthAttr = WIDTH_PATTERN.matcher(svg);
+    if (widthAttr.find()) {
+      String replacement = String.format(Locale.ROOT, "width='%.3f%s'",
+                                         width,
+                                         widthAttr.group(2));
+      svg = widthAttr.replaceFirst(replacement);
+    }
+    return svg;
   }
 
   private List<IAtomContainer> getReactionPanel(IReactionSet rxns, String panel) {

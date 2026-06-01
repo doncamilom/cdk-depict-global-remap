@@ -63,4 +63,23 @@ class DepictControllerTest {
     assertThat(svg, not(containsString("reaction-arrow")));
   }
 
+  @Test
+  void mappedReactionCanStripProductsAfterFullLayout() throws Exception {
+    DepictController controller = new DepictController();
+    Map<String, String> params = new HashMap<>();
+    params.put("alignrxnmap", "true");
+    params.put("striprxn", "products");
+
+    HttpEntity<?> response = controller.depict("[CH3:1][CH2:2][OH:3]>>[CH3:1][CH:2]=[O:3]",
+                                               "svg",
+                                               "bot",
+                                               params);
+
+    String svg = new String((byte[]) response.getBody(), StandardCharsets.UTF_8);
+    assertThat(svg, containsString("id='mol1'"));
+    assertThat(svg, not(containsString("id='mol2'")));
+    assertThat(svg, not(containsString("l-4.142")));
+  }
+
+
 }
